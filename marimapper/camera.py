@@ -1,5 +1,11 @@
+from __future__ import annotations
+
 import cv2
+import numpy as np
 from multiprocessing import get_logger
+
+from marimapper.camera_devices import _capture_backends
+from marimapper.camera_exposure import apply_software_gain
 
 logger = get_logger()
 
@@ -26,7 +32,7 @@ class Camera:
         logger.info(f"Connecting to device {device_id} ...")
         self.device_id = device_id
 
-        for capture_method in [cv2.CAP_DSHOW, cv2.CAP_V4L2, cv2.CAP_ANY]:
+        for capture_method in _capture_backends():
             self.device = cv2.VideoCapture(device_id, capture_method)
             if self.device.isOpened():
                 logger.debug(
@@ -38,6 +44,11 @@ class Camera:
             raise RuntimeError(f"Failed to connect to camera {device_id}")
 
         self.default_settings = CameraSettings(self)
+        self._software_gain: float | None = None
+        self.exposure_status = ""
+        if isinstance(device_id, int):
+            for _ in range(20):
+                self.device.read()
 
     def reset(self):
         self.default_settings.apply(self)
@@ -95,9 +106,29 @@ class Camera:
         for _ in range(count):
             self.read()
 
+    def set_software_gain(self, gain: float | None) -> None:
+        self._software_gain = gain
+
+    def _warmup_for_capture(self, preview_mode: bool = True) -> float:
+        """Discard startup frames after exposure settings were applied."""
+        brightest = 0.0
+        for _ in range(45):
+            image = self.read()
+            if image is not None:
+                brightest = max(brightest, float(image.mean()))
+        return brightest
+
+    @staticmethod
+    def frame_brightness(image: np.ndarray) -> float:
+        if image is None or image.size == 0:
+            return 0.0
+        return float(image.mean())
+
     def read(self):
         ret_val, image = self.device.read()
         if not ret_val:
             raise Exception("Failed to read image")
 
+        if self._software_gain is not None and self._software_gain < 0.999:
+            image = apply_software_gain(image, self._software_gain)
         return image

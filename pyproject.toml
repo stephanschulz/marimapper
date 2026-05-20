@@ -13,9 +13,13 @@ dependencies = [
     "tqdm",
     "open3d",
     "pycolmap==3.11.1", # 2 track is broken on > 3.12. see https://github.com/TheMariday/marimapper/issues/79
-    "pyserial",          # required by fcmega
+    "pyserial",          # required by fcmega, enttec
     "pixelblaze-client", # required by pixelblaze
-    "requests"           # required by wled
+    "requests",          # required by wled
+    "stupidartnet",      # Art-Net DMX output
+    "PySide6",           # DMX tester GUI
+    "pyftdi",            # Generic FTDI USB-DMX (raw 250k)
+    "pyobjc-framework-AVFoundation; sys_platform == 'darwin'",  # camera names match OpenCV
 ]
 
 classifiers = [
@@ -55,6 +59,7 @@ marimapper = "marimapper.scripts.scanner_cli:main"
 marimapper_check_camera = "marimapper.scripts.check_camera_cli:main"
 marimapper_check_backend ="marimapper.scripts.check_backend_cli:main"
 marimapper_upload_mapping_to_pixelblaze = "marimapper.scripts.upload_map_to_pixelblaze_cli:main"
+marimapper_dmx_gui = "marimapper.scripts.dmx_gui_cli:main"
 
 
 [tool.coverage.run]

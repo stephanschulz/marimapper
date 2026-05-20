@@ -1,14 +1,19 @@
+from __future__ import annotations
+
 import logging
 
 import cv2
 import time
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 import numpy as np
 from multiprocessing import get_logger
 
 from marimapper.camera import Camera
 from marimapper.timeout_controller import TimeoutController
 from marimapper.led import Point2D, LED2D
+
+if TYPE_CHECKING:
+    from marimapper.detection_roi import DetectionRoi
 
 
 logger = get_logger()
@@ -22,7 +27,14 @@ def contour_brightness(image: np.ndarray, contour: np.ndarray) -> int:
     return cv2.sumElems(masked_image)
 
 
-def find_led_in_image(image: np.ndarray, threshold: int = 128) -> Optional[Point2D]:
+def find_led_in_image(
+    image: np.ndarray,
+    threshold: int = 128,
+    roi: DetectionRoi | None = None,
+) -> Optional[Point2D]:
+
+    if roi is not None and roi.is_valid():
+        image = roi.apply_to_image(image)
 
     if len(image.shape) > 2:
         image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
@@ -103,21 +115,36 @@ def set_cam_default(cam: Camera) -> None:
     cam.eat()
 
 
-def set_cam_dark(cam: Camera, exposure: int) -> bool:
-    logger.info("setting cam to dark mode")
+def set_cam_preview(cam: Camera, exposure: int = 0) -> float:
+    """
+    Configure preview exposure.
+
+    ``exposure`` 0 uses auto (where supported). Negative values apply darkening
+    (software on macOS when UVC is not available through AVFoundation).
+
+    Returns peak frame brightness after warmup (0 = black / blocked).
+    """
+    from marimapper.camera_exposure import configure_camera_exposure
+
+    logger.info("setting cam to preview mode exposure=%s", exposure)
+    cam.reset()
+    status, gain = configure_camera_exposure(cam, exposure, dark=False)
+    cam.exposure_status = status
+    cam.set_software_gain(gain)
     cam.set_autofocus(0, 0)
-    cam.set_exposure_mode(0)
-    cam.set_gain(0)
-    if not cam.set_exposure(exposure):
-        logger.warning(
-            f"failed to set exposure to {exposure}, your camera might not support exposure control, "
-            f"try darkening the scene and adjusting the threshold with --threshold "
-        )
+    return cam._warmup_for_capture(preview_mode=True)
 
-    exposure_success = cam.set_exposure(exposure)
+
+def set_cam_dark(cam: Camera, exposure: int) -> bool:
+    from marimapper.camera_exposure import configure_camera_exposure
+
+    logger.info("setting cam to dark mode exposure=%s", exposure)
+    cam.set_autofocus(0, 0)
+    status, gain = configure_camera_exposure(cam, exposure, dark=True)
+    cam.exposure_status = status
+    cam.set_software_gain(gain)
     cam.eat()
-
-    return exposure_success
+    return gain is not None or "hardware" in status
 
 
 def find_led(
@@ -134,6 +161,21 @@ def find_led(
     return results
 
 
+def _read_and_detect(
+    cam: Camera,
+    threshold: int,
+    subtractor,
+    display: bool,
+) -> Optional[Point2D]:
+    image = cam.read()
+    if subtractor is not None:
+        point = subtractor.find_led(image)
+        if display:
+            show_image(draw_led_detections(image, point))
+        return point
+    return find_led(cam, threshold, display)
+
+
 def enable_and_find_led(
     cam: Camera,
     led_backend,
@@ -142,30 +184,49 @@ def enable_and_find_led(
     timeout_controller: TimeoutController,
     threshold: int,
     display: bool = False,
+    use_frame_diff: bool = True,
 ) -> Optional[LED2D]:
 
     darkness_timeout_seconds = 3.0
+    if use_frame_diff:
+        from marimapper.led_background import LedBackgroundSubtractor
 
-    # First wait for no leds to be visible, this should always be false
+        subtractor = LedBackgroundSubtractor(threshold=threshold)
+    else:
+        subtractor = None
+
     start = time.time()
-    while find_led(cam, threshold, display) is not None:
+    while True:
+        image = cam.read()
+        if subtractor is not None:
+            subtractor.update(image)
+            point = subtractor.find_led(image)
+        else:
+            point = find_led_in_image(image, threshold)
+            if display:
+                show_image(draw_led_detections(image, point))
+        if point is None:
+            break
         if time.time() - start > darkness_timeout_seconds:
             logging.warning(
                 f"Detector can't start detecting led {led_id} as an led is already visible"
             )
             return None
 
-    # Set the led to on and start the clock
     response_time_start = time.time()
-
     led_backend.set_led(led_id, True)
 
-    # Wait until either we have a result or we run out of time
     point = None
     while (
         point is None and time.time() < response_time_start + timeout_controller.timeout
     ):
-        point = find_led(cam, threshold, display)
+        image = cam.read()
+        if subtractor is not None:
+            point = subtractor.find_led(image)
+            if display:
+                show_image(draw_led_detections(image, point))
+        else:
+            point = find_led(cam, threshold, display)
 
     led_backend.set_led(led_id, False)
 
@@ -175,7 +236,19 @@ def enable_and_find_led(
     timeout_controller.add_response_time(time.time() - response_time_start)
 
     start = time.time()
-    while find_led(cam, threshold, display) is not None:
+    while True:
+        image = cam.read()
+        if subtractor is not None:
+            subtractor.update(image)
+            point = subtractor.find_led(image)
+            if display:
+                show_image(draw_led_detections(image, point))
+        else:
+            point = find_led_in_image(image, threshold)
+            if display:
+                show_image(draw_led_detections(image, point))
+        if point is None:
+            break
         if time.time() - start > darkness_timeout_seconds:
             logging.warning(
                 f"Detector can't stop detecting led {led_id} as an led is already visible, retrying backend..."

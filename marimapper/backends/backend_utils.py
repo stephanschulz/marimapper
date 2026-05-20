@@ -5,6 +5,8 @@ from marimapper.backends.fcmega import fcmega_backend
 from marimapper.backends.pixelblaze import pixelblaze_backend
 from marimapper.backends.wled import wled_backend
 from marimapper.backends.artnet import artnet_backend
+from marimapper.backends.enttec import enttec_backend
+from marimapper.backends.generic_usb import generic_usb_backend
 
 backend_factories = {
     "custom": custom_backend.custom_backend_factory,
@@ -14,6 +16,8 @@ backend_factories = {
     "pixelblaze": pixelblaze_backend.pixelblaze_backend_factory,
     "wled": wled_backend.wled_backend_factory,
     "artnet": artnet_backend.artnet_backend_factory,
+    "enttec": enttec_backend.enttec_backend_factory,
+    "generic_usb": generic_usb_backend.generic_usb_backend_factory,
 }
 
 backend_arg_setters = {
@@ -24,4 +28,6 @@ backend_arg_setters = {
     "pixelblaze": pixelblaze_backend.pixelblaze_backend_set_args,
     "wled": wled_backend.wled_backend_set_args,
     "artnet": artnet_backend.artnet_set_args,
+    "enttec": enttec_backend.enttec_set_args,
+    "generic_usb": generic_usb_backend.generic_usb_set_args,
 }

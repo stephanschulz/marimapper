@@ -47,6 +47,41 @@ def add_common_args(parser) -> None:
     parser.add_argument("-v", "--verbose", action="store_true")
 
 
+def add_detection_dmx_args(parser) -> None:
+    """Map LED indices to a DMX channel range (and Art-Net universe)."""
+    group = parser.add_argument_group("detection DMX mapping")
+    group.add_argument(
+        "--det_min_channel",
+        type=int,
+        default=1,
+        help="First DMX channel for LED index 0 (1-based)",
+    )
+    group.add_argument(
+        "--det_max_channel",
+        type=int,
+        default=50,
+        help="Last DMX channel in the scan range (1-based, inclusive)",
+    )
+    group.add_argument(
+        "--det_channels_per_fixture",
+        type=int,
+        default=1,
+        help="DMX channels per LED / bulb",
+    )
+    group.add_argument(
+        "--det_universe",
+        type=int,
+        default=0,
+        help="Art-Net universe for detection (ignored for USB backends)",
+    )
+    group.add_argument(
+        "--det_on_level",
+        type=int,
+        default=255,
+        help="DMX level when a bulb is ON for detection",
+    )
+
+
 def add_scanner_args(parser) -> None:
 
     scanner_options = parser.add_argument_group("scanner options")
@@ -129,6 +164,8 @@ def add_all_backend_parsers(parser, required=False) -> list[argparse.ArgumentPar
         )
 
         backend_arg_setter(backend_parser_group)
+        if backend_name in ("artnet", "enttec", "generic_usb"):
+            add_detection_dmx_args(backend_parser)
 
         backend_subparsers.append(backend_parser)
 

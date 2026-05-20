@@ -86,11 +86,16 @@ Please see below for documentation on how to run the following backends:
 - 🟢 [FCMega](https://github.com/TheMariday/marimapper/tree/main/docs/backends/FCMEGA.md) - Tested
 - 🟠 [WLED](https://github.com/TheMariday/marimapper/tree/main/docs/backends/WLED.md) - Community tested
 - 🟠 [PixelBlaze](https://github.com/TheMariday/marimapper/tree/main/docs/backends/PixelBlaze.md) - Community tested
-- 🔴 [ArtNet](https://github.com/TheMariday/marimapper/tree/main/docs/backends/ArtNet.md) - Experimental
+- 🟠 [ArtNet](https://github.com/TheMariday/marimapper/tree/main/docs/backends/ArtNet.md) - Community tested (DMX GUI + scan backend)
+- 🟠 [Enttec USB Pro](https://github.com/TheMariday/marimapper/tree/main/docs/backends/Enttec.md) - Community tested (DMX GUI + scan backend)
+- 🟠 [Generic USB (FTDI)](https://github.com/TheMariday/marimapper/tree/main/docs/backends/GenericUsb.md) - Community tested (DMX GUI + scan backend)
 
 If your LED backend isn't supported, you need to write your own, 
 [it's super simple](https://github.com/TheMariday/marimapper/tree/main/docs/backends/custom.md)!
 
+
+> [!TIP]
+> Run `marimapper_dmx_gui` for Art-Net / Enttec / Generic USB DMX control **and camera LED detection** (channel range + universe).
 
 > [!TIP]
 > use `marimapper wled --help` for any backend to show a full list of additional arguments 
