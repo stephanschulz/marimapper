@@ -4,6 +4,20 @@ This guide covers **single-camera 2D mapping**: turn each DMX channel on in turn
 
 This uses the **DMX GUI** (`marimapper_dmx_gui`), not the multi-view 3D `marimapper` scanner.
 
+## Screenshots
+
+**MariMapper DMX + Detection** — Art-Net / Enttec / Generic USB output, channel mapping, and test patterns:
+
+![MariMapper DMX + Detection window](screenshots/MariMapper%20DMX%20+%20Detection.jpg)
+
+**Camera — LED detection** — live preview, threshold view, ROI, and scan controls:
+
+![Camera LED detection window](screenshots/Camera%20-%20LED%20detection.jpg)
+
+**2D LED map** — browse saved scans, zoom the overlay, and inspect DMX channel assignments:
+
+![2D LED map window](screenshots/2D%20LED%20map.jpg)
+
 ## What you need
 
 - A **DMX output** device supported by the GUI:
@@ -28,7 +42,7 @@ pip install -e .
 marimapper_dmx_gui
 ```
 
-Or install globally with [uv](https://github.com/astral-sh/uv) / pip as described in [README.md](README.md), then run:
+Or install globally with [uv](https://github.com/astral-sh/uv) / pip as described in [README-marimapper.md](README-marimapper.md), then run:
 
 ```bash
 marimapper_dmx_gui
@@ -179,7 +193,7 @@ Older maps saved to `~/marimapper_maps/` are moved into `scans/` automatically o
 | Too many false hits | Raise threshold, tighten ROI, remove reflections |
 | Wrong camera | Change **Camera** dropdown or run `marimapper_check_camera --device N` |
 | Scan finishes with 0 detections | Test individual IDs first; verify DMX and camera alignment |
-| macOS exposure | Use UVC panel; manual camera app settings if needed ([README](README.md#step-0-install)) |
+| macOS exposure | Use UVC panel; manual camera app settings if needed ([README-marimapper.md](README-marimapper.md)) |
 
 ## DMX channel mapping reference
 
@@ -203,3 +217,18 @@ marimapper enttec --help
 ```
 
 For this project's **2D DMX calibration workflow**, use **`marimapper_dmx_gui`** and the camera window scan.
+
+## Acknowledgments
+
+This project builds on **[MariMapper](https://github.com/TheMariday/marimapper)** by [TheMariday](https://github.com/TheMariday) — a tool that maps addressable LEDs into 2D and 3D space using a webcam. The DMX GUI, camera detection pipeline, and LED mapping core come from that upstream project.
+
+- Upstream repository: [github.com/TheMariday/marimapper](https://github.com/TheMariday/marimapper)
+- Upstream documentation: [README-marimapper.md](README-marimapper.md)
+
+Thank you to the original developer and contributors for MariMapper.
+
+## Licensing
+
+This project inherits the upstream [GPLv3](LICENSE) license.
+
+The TLDR is you can do anything you like with this as long as it's open source.

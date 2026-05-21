@@ -131,21 +131,28 @@ class MapResultsWindow(QMainWindow):
         self._preview.set_live_frame(frame)
 
     def _refresh_csv_list(self, select_path: Path | None = None) -> None:
+        # Populate with signals blocked, then explicitly trigger the load so
+        # we don't depend on currentIndexChanged firing — QComboBox auto-sets
+        # the index to 0 on first addItem, so a later setCurrentIndex(0) is a
+        # no-op and the handler wouldn't run otherwise.
         self._csv_combo.blockSignals(True)
         self._csv_combo.clear()
         paths = list_2d_map_csv_files(self._maps_dir)
         for path in paths:
             self._csv_combo.addItem(path.name, str(path.resolve()))
+
+        target_index = -1
+        if select_path is not None:
+            target_index = self._csv_combo.findData(str(select_path.resolve()))
+        if target_index < 0 and self._csv_combo.count() > 0:
+            target_index = 0
+        if target_index >= 0:
+            self._csv_combo.setCurrentIndex(target_index)
         self._csv_combo.blockSignals(False)
 
-        if select_path is not None:
-            index = self._csv_combo.findData(str(select_path.resolve()))
-            if index >= 0:
-                self._csv_combo.setCurrentIndex(index)
-                return
-        if self._csv_combo.count() > 0:
-            self._csv_combo.setCurrentIndex(0)
-        elif select_path is None:
+        if target_index >= 0:
+            self._on_csv_selected(target_index)
+        else:
             self._clear_display()
 
     def _on_csv_selected(self, _index: int) -> None:

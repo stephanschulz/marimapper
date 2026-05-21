@@ -175,7 +175,7 @@ class DmxControllerWindow(QMainWindow):
 
         self.status_label = QLabel("Not connected")
         self.status_label.setAlignment(Qt.AlignCenter)
-        self.status_label.setFont(QFont("monospace", 11))
+        self.status_label.setFont(QFont("Menlo", 11))
         layout.addWidget(self.status_label)
 
         viz_group = QGroupBox("Channel output (preview)")
