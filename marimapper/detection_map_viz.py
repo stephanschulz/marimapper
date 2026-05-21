@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import typing
+
 import cv2
 import numpy as np
 
@@ -26,7 +28,9 @@ def draw_led_map(
     leds: list[LED2D],
     *,
     show_labels: bool = True,
-    marker_size: int = 24,
+    marker_size: int = 20,
+    label_formatter: typing.Callable[[LED2D], str] | None = None,
+    font_scale: float | None = None,
 ) -> np.ndarray:
     """Overlay all detected LEDs on a BGR or grayscale frame."""
     if len(image.shape) == 2:
@@ -35,12 +39,15 @@ def draw_led_map(
         render_image = image.copy()
 
     img_height, img_width = render_image.shape[:2]
+    if font_scale is None:
+        font_scale = max(0.45, min(img_width, img_height) / 1400.0)
+    thickness = max(1, int(round(font_scale * 2)))
 
     for led in sorted(leds, key=lambda item: item.led_id):
         point = led.point
-        if point.contours:
-            cv2.drawContours(render_image, point.contours, -1, (255, 120, 0), 1)
-
+        # Skip placeholder rows for LEDs that were scanned but not detected.
+        if point.u() < 0.0 or point.v() < 0.0:
+            continue
         u_abs, v_abs = normalized_to_pixel(
             point.u(), point.v(), img_width, img_height
         )
@@ -50,21 +57,55 @@ def draw_led_map(
             (0, 255, 0),
             markerType=cv2.MARKER_CROSS,
             markerSize=marker_size,
-            thickness=2,
+            thickness=1,
         )
         if show_labels:
+            text = (
+                label_formatter(led)
+                if label_formatter is not None
+                else str(led.led_id)
+            )
             cv2.putText(
                 render_image,
-                str(led.led_id),
+                text,
                 (u_abs + 6, v_abs - 6),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                0.45,
+                font_scale,
                 (255, 255, 255),
-                1,
+                thickness,
                 cv2.LINE_AA,
             )
 
     return render_image
+
+
+def dmx_channel_for_led(
+    led_id: int, *, min_channel: int = 1, channels_per_fixture: int = 1
+) -> int:
+    """Return 1-based DMX channel for a scan LED index."""
+    return min_channel + led_id * channels_per_fixture
+
+
+def draw_led_map_with_dmx(
+    image: np.ndarray,
+    leds: list[LED2D],
+    *,
+    min_channel: int = 1,
+    channels_per_fixture: int = 1,
+    **kwargs,
+) -> np.ndarray:
+    """Overlay LEDs with crosshairs and 1-based DMX channel labels."""
+
+    def label(led: LED2D) -> str:
+        return str(
+            dmx_channel_for_led(
+                led.led_id,
+                min_channel=min_channel,
+                channels_per_fixture=channels_per_fixture,
+            )
+        )
+
+    return draw_led_map(image, leds, label_formatter=label, **kwargs)
 
 
 def draw_led_map_from_points(

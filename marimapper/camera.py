@@ -31,6 +31,7 @@ class Camera:
     def __init__(self, device_id):
         logger.info(f"Connecting to device {device_id} ...")
         self.device_id = device_id
+        self.device = None
 
         for capture_method in _capture_backends():
             self.device = cv2.VideoCapture(device_id, capture_method)
@@ -39,16 +40,22 @@ class Camera:
                     f"Connected to device {device_id} with capture method {capture_method}"
                 )
                 break
+            self.device.release()
 
-        if not self.device.isOpened():
+        if self.device is None or not self.device.isOpened():
             raise RuntimeError(f"Failed to connect to camera {device_id}")
 
-        self.default_settings = CameraSettings(self)
+        # default_settings is queried lazily — calling get(CAP_PROP_*) right
+        # after open can stall for seconds on freshly-handed-off macOS devices.
+        self._default_settings: CameraSettings | None = None
         self._software_gain: float | None = None
         self.exposure_status = ""
-        if isinstance(device_id, int):
-            for _ in range(20):
-                self.device.read()
+
+    @property
+    def default_settings(self) -> CameraSettings:
+        if self._default_settings is None:
+            self._default_settings = CameraSettings(self)
+        return self._default_settings
 
     def reset(self):
         self.default_settings.apply(self)
@@ -112,7 +119,7 @@ class Camera:
     def _warmup_for_capture(self, preview_mode: bool = True) -> float:
         """Discard startup frames after exposure settings were applied."""
         brightest = 0.0
-        for _ in range(45):
+        for _ in range(10):
             image = self.read()
             if image is not None:
                 brightest = max(brightest, float(image.mean()))

@@ -8,6 +8,7 @@ from marimapper.camera_devices import (
     _label_for_index,
     _macos_opencv_device_names,
     list_cameras,
+    probe_single_camera,
 )
 
 
@@ -85,6 +86,38 @@ def test_ffmpeg_parse_video_devices():
             run.return_value.stdout = ""
             names = _ffmpeg_avfoundation_video_names()
     assert names == {0: "NDI Virtual Camera", 3: "Logitech BRIO"}
+
+
+def test_probe_single_camera_only_probes_target(monkeypatch):
+    """The fast path must not enumerate every index."""
+    probed: list[int] = []
+
+    def fake_probe(index, backends, warmup_reads=5):
+        probed.append(index)
+        return (True, 120.0) if index == 4 else (False, 0.0)
+
+    monkeypatch.setattr(
+        "marimapper.camera_devices._probe_opencv_index", fake_probe
+    )
+    monkeypatch.setattr(
+        "marimapper.camera_devices._camera_name_map",
+        lambda: {4: "Logitech BRIO"},
+    )
+
+    result = probe_single_camera(4)
+    assert result == (4, "[4] Logitech BRIO")
+    assert probed == [4]
+
+
+def test_probe_single_camera_returns_none_when_missing(monkeypatch):
+    monkeypatch.setattr(
+        "marimapper.camera_devices._probe_opencv_index",
+        lambda index, backends, warmup_reads=5: (False, 0.0),
+    )
+    monkeypatch.setattr(
+        "marimapper.camera_devices._camera_name_map", lambda: {}
+    )
+    assert probe_single_camera(7) is None
 
 
 def test_list_cameras_no_early_stop(monkeypatch):

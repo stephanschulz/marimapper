@@ -9,7 +9,7 @@ import os
 import sys
 import time
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QTimer, Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import (
     QApplication,
@@ -221,17 +221,6 @@ class DmxControllerWindow(QMainWindow):
             self.det_on_level,
         ):
             widget.valueChanged.connect(self._on_detection_mapping_changed)
-
-        self.btn_open_camera = QPushButton("Show camera window")
-        self.btn_open_camera.clicked.connect(self.show_camera_window)
-        det_form.addRow("", self.btn_open_camera)
-
-        det_hint = QLabel(
-            "Live preview, exposure, and scan controls are in the camera window. "
-            "The feed stays on during test and scan."
-        )
-        det_hint.setWordWrap(True)
-        det_form.addRow("", det_hint)
 
         layout.addWidget(det_group)
 

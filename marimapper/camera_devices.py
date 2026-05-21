@@ -145,6 +145,25 @@ def _probe_opencv_index(
     return False, peak
 
 
+def probe_single_camera(index: int) -> tuple[int, str] | None:
+    """
+    Fast check for a single camera index without enumerating others.
+
+    Used for the startup fast path so we don't scan all 16 indexes when the
+    last-selected camera is still present. Uses fewer warmup reads than the
+    full enumeration.
+    """
+    backends = _capture_backends()
+    ok, peak = _probe_opencv_index(index, backends, warmup_reads=5)
+    if not ok:
+        return None
+    name_map = _camera_name_map()
+    label = _label_for_index(index, name_map, peak)
+    if _should_skip_camera(label):
+        return None
+    return index, label
+
+
 def list_cameras(max_probe: int = 16) -> list[tuple[int, str]]:
     """
     Return (device_index, label) for each camera that captures frames.

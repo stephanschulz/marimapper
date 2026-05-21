@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QColor, QCursor, QFont, QPainter, QPen, QPixmap
+from PySide6.QtGui import QColor, QCursor, QFont, QPainter, QPen, QPixmap, QWheelEvent
 from PySide6.QtWidgets import QLabel, QSizePolicy, QVBoxLayout, QWidget
 
 from marimapper.detection_roi import DetectionRoi
@@ -48,6 +48,114 @@ class FramePreviewWidget(QWidget):
 
         rect = RoiPreviewWidget._fit_rect(self._pixmap.size(), QRectF(self.rect()))
         painter.drawPixmap(rect.toRect(), self._pixmap)
+        painter.end()
+
+
+class ZoomableFramePreviewWidget(FramePreviewWidget):
+    """Frame preview with scroll-wheel zoom centered on the cursor."""
+
+    _MIN_ZOOM = 0.25
+    _MAX_ZOOM = 12.0
+    _ZOOM_STEP = 1.12
+
+    def __init__(self, title: str = "", parent=None):
+        super().__init__(title, parent)
+        self._zoom = 1.0
+        self._pan = QPointF(0.0, 0.0)
+        self.setToolTip("Scroll to zoom (cursor-centered). Double-click to reset zoom.")
+
+    def set_frame(self, frame) -> None:
+        self._zoom = 1.0
+        self._pan = QPointF(0.0, 0.0)
+        super().set_frame(frame)
+
+    def reset_view(self) -> None:
+        self._zoom = 1.0
+        self._pan = QPointF(0.0, 0.0)
+        self.update()
+
+    def _base_fit_rect(self) -> QRectF | None:
+        if self._pixmap is None or self._pixmap.isNull():
+            return None
+        return RoiPreviewWidget._fit_rect(self._pixmap.size(), QRectF(self.rect()))
+
+    def _display_rect(self) -> QRectF | None:
+        base = self._base_fit_rect()
+        if base is None or base.isEmpty():
+            return None
+        width = base.width() * self._zoom
+        height = base.height() * self._zoom
+        center = base.center() + self._pan
+        return QRectF(center.x() - width / 2.0, center.y() - height / 2.0, width, height)
+
+    def _norm_at_widget(self, wx: float, wy: float) -> tuple[float, float] | None:
+        rect = self._display_rect()
+        if rect is None or rect.width() <= 0 or rect.height() <= 0:
+            return None
+        return (
+            (wx - rect.left()) / rect.width(),
+            (wy - rect.top()) / rect.height(),
+        )
+
+    def wheelEvent(self, event: QWheelEvent) -> None:
+        if self._pixmap is None or self._pixmap.isNull():
+            return
+        delta = event.angleDelta().y()
+        if delta == 0:
+            return
+        factor = self._ZOOM_STEP if delta > 0 else 1.0 / self._ZOOM_STEP
+        new_zoom = max(self._MIN_ZOOM, min(self._MAX_ZOOM, self._zoom * factor))
+        if abs(new_zoom - self._zoom) < 1e-6:
+            return
+
+        mouse = event.position()
+        norm = self._norm_at_widget(mouse.x(), mouse.y())
+        if norm is None:
+            self._zoom = new_zoom
+            self.update()
+            event.accept()
+            return
+
+        nx, ny = norm
+        base = self._base_fit_rect()
+        assert base is not None
+        new_w = base.width() * new_zoom
+        new_h = base.height() * new_zoom
+        new_cx = mouse.x() - nx * new_w + new_w / 2.0
+        new_cy = mouse.y() - ny * new_h + new_h / 2.0
+        self._pan = QPointF(new_cx - base.center().x(), new_cy - base.center().y())
+        self._zoom = new_zoom
+        self.update()
+        event.accept()
+
+    def mouseDoubleClickEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.reset_view()
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
+
+    def paintEvent(self, _event) -> None:
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), QColor(20, 20, 20))
+
+        if self._pixmap is None or self._pixmap.isNull():
+            painter.setPen(QColor(120, 120, 120))
+            painter.setFont(QFont("Helvetica", 12))
+            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, self._title or "Preview")
+            painter.end()
+            return
+
+        rect = self._display_rect()
+        if rect is None:
+            painter.end()
+            return
+
+        painter.drawPixmap(rect.toRect(), self._pixmap)
+        if self._zoom != 1.0:
+            painter.setPen(QColor(140, 140, 140))
+            painter.setFont(QFont("Helvetica", 10))
+            painter.drawText(8, 16, f"Zoom {self._zoom:.0%} — double-click to reset")
         painter.end()
 
 
@@ -295,7 +403,7 @@ class RoiPreviewWidget(QWidget):
             painter.drawText(
                 8,
                 20,
-                "Click corners — double-click or Close to finish (min 3 points)",
+                "Click corners — double-click to finish (min 3 points)",
             )
         elif self._roi.is_valid():
             painter.setPen(QColor(160, 160, 160))

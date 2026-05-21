@@ -8,6 +8,7 @@ import re
 import shutil
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -218,3 +219,149 @@ def apply_uvc_exposure(
     if mode == "auto":
         return True, "UVC auto exposure (IOKit)"
     return True, f"UVC manual exposure (IOKit) fraction={frac:.3f}"
+
+
+# Controls exposed in the GUI (device may implement a subset).
+UVC_GUI_CONTROL_NAMES: tuple[str, ...] = (
+    "auto-focus",
+    "focus-abs",
+    "auto-white-balance-temp",
+    "white-balance-temp",
+    "gain",
+    "sharpness",
+    "brightness",
+    "contrast",
+    "saturation",
+)
+
+UVC_GUI_LABELS: dict[str, str] = {
+    "auto-focus": "Auto focus",
+    "focus-abs": "Focus",
+    "auto-white-balance-temp": "Auto white balance",
+    "white-balance-temp": "White balance (K)",
+    "gain": "Gain",
+    "sharpness": "Sharpness",
+    "brightness": "Brightness",
+    "contrast": "Contrast",
+    "saturation": "Saturation",
+}
+
+
+@dataclass
+class UvcControlInfo:
+    name: str
+    kind: str  # "bool" | "int"
+    minimum: int | None = None
+    maximum: int | None = None
+    step: int | None = None
+    default: int | bool | None = None
+    current: int | bool | None = None
+
+
+def _parse_bool_token(token: str) -> bool | None:
+    lower = token.strip().lower()
+    if lower == "true":
+        return True
+    if lower == "false":
+        return False
+    return None
+
+
+def parse_uvc_show_control(text: str, control_name: str) -> UvcControlInfo | None:
+    if control_name not in text:
+        return None
+    is_bool = "boolean" in text
+    kind = "bool" if is_bool else "int"
+
+    def _field(name: str):
+        match = re.search(rf"{name}:\s*(\S+)", text)
+        if not match:
+            return None
+        token = match.group(1)
+        if is_bool:
+            return _parse_bool_token(token)
+        try:
+            return int(token)
+        except ValueError:
+            return None
+
+    return UvcControlInfo(
+        name=control_name,
+        kind=kind,
+        minimum=_field("minimum"),
+        maximum=_field("maximum"),
+        step=_field("step-size"),
+        default=_field("default-value"),
+        current=_field("current-value"),
+    )
+
+
+def list_device_uvc_controls(device_index: int) -> list[str]:
+    try:
+        select = _select_args(device_index, None, None, None)
+        result = _run_uvc([*select, "--list-controls"])
+    except (OSError, subprocess.SubprocessError, FileNotFoundError):
+        return []
+    if result.returncode != 0:
+        return []
+    names: list[str] = []
+    for line in result.stdout.splitlines():
+        stripped = line.strip()
+        if stripped and not stripped.startswith("UVC"):
+            names.append(stripped)
+    return names
+
+
+def read_uvc_control(device_index: int, control_name: str) -> UvcControlInfo | None:
+    try:
+        select = _select_args(device_index, None, None, None)
+        result = _run_uvc([*select, "-S", control_name])
+    except (OSError, subprocess.SubprocessError, FileNotFoundError):
+        return None
+    if result.returncode != 0:
+        return None
+    return parse_uvc_show_control(result.stdout, control_name)
+
+
+def set_uvc_control(
+    device_index: int,
+    control_name: str,
+    value: int | bool | float | str,
+) -> tuple[bool, str]:
+    try:
+        select = _select_args(device_index, None, None, None)
+        if isinstance(value, bool):
+            text = "true" if value else "false"
+        elif isinstance(value, float):
+            text = f"{value:.4f}"
+        else:
+            text = str(value)
+        result = _run_uvc([*select, "--set", f"{control_name}={text}"])
+    except (OSError, subprocess.SubprocessError, FileNotFoundError) as error:
+        return False, str(error)
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()
+        return False, detail or str(result.returncode)
+    return True, "ok"
+
+
+def reset_uvc_controls(device_index: int) -> tuple[bool, str]:
+    try:
+        select = _select_args(device_index, None, None, None)
+        result = _run_uvc([*select, "--reset-all"])
+    except (OSError, subprocess.SubprocessError, FileNotFoundError) as error:
+        return False, str(error)
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()
+        return False, detail or str(result.returncode)
+    return True, "ok"
+
+
+def uvc_available() -> bool:
+    if sys.platform != "darwin":
+        return False
+    try:
+        ensure_uvc_util()
+        return True
+    except (OSError, FileNotFoundError, subprocess.SubprocessError):
+        return False

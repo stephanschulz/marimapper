@@ -80,10 +80,6 @@ def draw_led_detections(image: cv2.Mat, led_detection: Optional[Point2D]) -> np.
     img_height = render_image.shape[0]
     img_width = render_image.shape[1]
 
-    cv2.drawContours(
-        render_image, led_detection.contours, -1, (255, 0, 0), 1
-    )  # TODO, de-normalise contours once normalised
-
     u_abs = int(led_detection.u() * img_width)
 
     v_offset = (img_width - img_height) / 2.0
@@ -94,7 +90,9 @@ def draw_led_detections(image: cv2.Mat, led_detection: Optional[Point2D]) -> np.
         render_image,
         (u_abs, v_abs),
         (0, 255, 0),
-        markerSize=100,
+        markerType=cv2.MARKER_CROSS,
+        markerSize=20,
+        thickness=1,
     )
 
     return render_image
@@ -127,7 +125,9 @@ def set_cam_preview(cam: Camera, exposure: int = 0) -> float:
     from marimapper.camera_exposure import configure_camera_exposure
 
     logger.info("setting cam to preview mode exposure=%s", exposure)
-    cam.reset()
+    # cam.reset() would re-read CAP_PROP_* and apply defaults. On a freshly
+    # opened macOS device that adds seconds of latency for no benefit because
+    # the device is already at its defaults. Skip it.
     status, gain = configure_camera_exposure(cam, exposure, dark=False)
     cam.exposure_status = status
     cam.set_software_gain(gain)

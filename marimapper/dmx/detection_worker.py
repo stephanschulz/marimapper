@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 
 import cv2
+import numpy as np
 from PySide6.QtCore import QThread, Signal
 
 from marimapper.camera import Camera
@@ -40,8 +41,13 @@ def _resize_for_display(frame, max_width: int = _PREVIEW_MAX_WIDTH):
 
 def _configure_preview_resolution(cam: Camera) -> None:
     """Ask for a smaller capture size when the driver supports it."""
-    cam.device.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-    cam.device.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+    target_w, target_h = 1280, 720
+    current_w = int(cam.device.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+    current_h = int(cam.device.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+    if current_w == target_w and current_h == target_h:
+        return
+    cam.device.set(cv2.CAP_PROP_FRAME_WIDTH, target_w)
+    cam.device.set(cv2.CAP_PROP_FRAME_HEIGHT, target_h)
 
 
 def _emit_frame_pair(
@@ -105,7 +111,7 @@ def _enable_and_find_led_no_gui(
         if point is None:
             break
         if time.time() - start > darkness_timeout_seconds:
-            return None
+            return None, None
 
     response_time_start = time.time()
     led_backend.set_led(led_id, True)
@@ -115,7 +121,7 @@ def _enable_and_find_led_no_gui(
     while point is None and time.time() < response_time_start + timeout_controller.timeout:
         if should_stop():
             led_backend.set_led(led_id, False)
-            return None
+            return None, None
         image = cam.read()
         if subtractor is not None:
             point = subtractor.find_led(image)
@@ -130,8 +136,9 @@ def _enable_and_find_led_no_gui(
     led_backend.set_led(led_id, False)
 
     if point is None:
-        return None
+        return None, None
 
+    detected_point = point
     timeout_controller.add_response_time(time.time() - response_time_start)
 
     start = time.time()
@@ -153,7 +160,7 @@ def _enable_and_find_led_no_gui(
             led_backend.set_led(led_id, False)
             break
 
-    return LED2D(led_id, view_id, point), detection_frame
+    return LED2D(led_id, view_id, detected_point), detection_frame
 
 
 class SharedDetectionCameraWorker(QThread):
@@ -170,7 +177,7 @@ class SharedDetectionCameraWorker(QThread):
     error = Signal(str)
     test_finished = Signal(object)
     scan_progress = Signal(int, int, object)
-    scan_finished = Signal(int, int, object, object)
+    scan_finished = Signal(int, int)
 
     def __init__(self):
         super().__init__()
@@ -190,6 +197,8 @@ class SharedDetectionCameraWorker(QThread):
         self._use_frame_diff = True
         self._roi = DetectionRoi()
         self._preview_subtractor: LedBackgroundSubtractor | None = None
+        self.last_scan_results: list[LED2D] = []
+        self.last_scan_reference_frame: np.ndarray | None = None
 
     def set_roi(self, roi: DetectionRoi) -> None:
         self._roi = DetectionRoi(points=list(roi.points))
@@ -283,14 +292,32 @@ class SharedDetectionCameraWorker(QThread):
         self._stop_current = False
         self._active_mode = "scan"
 
-    def _release_camera(self, cam: Camera) -> None:
+    def _release_camera(self, cam: Camera, *, restore_defaults: bool = False) -> None:
+        # The reset+eat in set_cam_default reads ~30 frames; that is needlessly
+        # slow when we're switching cameras (the device handle is about to go
+        # away anyway). Only restore defaults on full shutdown.
+        if restore_defaults:
+            try:
+                set_cam_default(cam)
+            except Exception:
+                pass
         try:
-            set_cam_default(cam)
+            cam.device.release()
         except Exception:
             pass
 
     def _open_camera(self, device: int) -> Camera:
-        cam = Camera(device)
+        try:
+            cam = Camera(device)
+        except RuntimeError:
+            # macOS handoff: previous capture may not have released yet.
+            self.msleep(200)
+            try:
+                cam = Camera(device)
+            except RuntimeError as error:
+                raise RuntimeError(
+                    f"Camera {device} busy or unavailable — close other apps using it."
+                ) from error
         _configure_preview_resolution(cam)
         return cam
 
@@ -366,7 +393,7 @@ class SharedDetectionCameraWorker(QThread):
                             "(scene stays dark until the LED flashes)."
                         )
                     timeout = TimeoutController()
-                    result = _enable_and_find_led_no_gui(
+                    result, _detection_frame = _enable_and_find_led_no_gui(
                         cam,
                         backend,
                         self._test_led_id,
@@ -414,7 +441,7 @@ class SharedDetectionCameraWorker(QThread):
                             ):
                                 break
                             timeout = TimeoutController()
-                            result = _enable_and_find_led_no_gui(
+                            led_result, detection_frame = _enable_and_find_led_no_gui(
                                 cam,
                                 backend,
                                 led_id,
@@ -426,22 +453,21 @@ class SharedDetectionCameraWorker(QThread):
                                 use_frame_diff=self._use_frame_diff,
                                 roi=self._roi,
                             )
-                            if result is not None:
+                            if led_result is not None and led_result.point is not None:
                                 detected += 1
-                                scan_results.append(result)
-                                frame = cam.read()
-                                if frame is not None and frame.size > 0:
-                                    reference_frame = frame.copy()
+                                scan_results.append(led_result)
+                                if detection_frame is not None:
+                                    reference_frame = detection_frame
                             self.scan_progress.emit(
-                                led_id - self._scan_start, total, result
+                                led_id - self._scan_start, total, led_result
                             )
                         if reference_frame is None:
                             frame = cam.read()
                             if frame is not None and frame.size > 0:
                                 reference_frame = frame.copy()
-                        self.scan_finished.emit(
-                            detected, total, scan_results, reference_frame
-                        )
+                        self.last_scan_results = list(scan_results)
+                        self.last_scan_reference_frame = reference_frame
+                        self.scan_finished.emit(detected, total)
                     finally:
                         try:
                             backend.all_off()
@@ -460,7 +486,7 @@ class SharedDetectionCameraWorker(QThread):
                     pass  # release on next idle iteration
 
         if cam is not None:
-            self._release_camera(cam)
+            self._release_camera(cam, restore_defaults=True)
 
 
 # Backwards-compatible aliases (same module, single implementation).

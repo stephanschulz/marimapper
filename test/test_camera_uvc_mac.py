@@ -3,13 +3,52 @@ from unittest.mock import MagicMock, patch
 from marimapper.camera_uvc_mac import (
     apply_uvc_exposure,
     find_uvc_util,
+    parse_uvc_show_control,
     slider_to_uvc_exposure_fraction,
 )
+
+
+FOCUS_SHOW = """focus-abs {
+  type-description: {
+    single value, unsigned 16-bit integer
+  },
+  minimum: 0
+  maximum: 255
+  step-size: 5
+  default-value: 0
+  current-value: 10
+}"""
+
+AUTO_FOCUS_SHOW = """auto-focus {
+  type-description: {
+    single value, boolean
+  },
+  minimum: false
+  maximum: true
+  default-value: true
+  current-value: false
+}"""
 
 
 def test_slider_to_uvc_fraction():
     assert slider_to_uvc_exposure_fraction(-13) == 0.0
     assert slider_to_uvc_exposure_fraction(0) == 1.0
+
+
+def test_parse_uvc_show_control_int():
+    info = parse_uvc_show_control(FOCUS_SHOW, "focus-abs")
+    assert info is not None
+    assert info.kind == "int"
+    assert info.minimum == 0
+    assert info.maximum == 255
+    assert info.current == 10
+
+
+def test_parse_uvc_show_control_bool():
+    info = parse_uvc_show_control(AUTO_FOCUS_SHOW, "auto-focus")
+    assert info is not None
+    assert info.kind == "bool"
+    assert info.current is False
 
 
 @patch("marimapper.camera_uvc_mac.ensure_uvc_util")
