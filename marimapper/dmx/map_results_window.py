@@ -83,7 +83,9 @@ class MapResultsWindow(QMainWindow):
         self._csv_combo.currentIndexChanged.connect(self._on_csv_selected)
         picker_row.addWidget(self._csv_combo, stretch=1)
         self._btn_refresh = QPushButton("Refresh")
-        self._btn_refresh.clicked.connect(self._refresh_csv_list)
+        # QPushButton.clicked emits a `checked` bool — discard it so it doesn't
+        # get passed as ``select_path``.
+        self._btn_refresh.clicked.connect(lambda: self._refresh_csv_list())
         picker_row.addWidget(self._btn_refresh)
         layout.addLayout(picker_row)
 

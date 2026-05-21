@@ -1,184 +1,205 @@
-![logo.png](docs/images/logo.png)
+# DMX 2D LED calibration
 
-[![Supported Python Version](https://img.shields.io/badge/python-3.9%20%7C%203.10%20%7C%203.11%20%7C%203.12-blue)]()
-[![Windows](https://github.com/TheMariday/MariMapper/actions/workflows/test_windows.yml/badge.svg)](https://github.com/TheMariday/MariMapper/actions/workflows/test_windows.yml)
-[![Ubuntu](https://github.com/TheMariday/MariMapper/actions/workflows/test_ubuntu.yml/badge.svg)](https://github.com/TheMariday/MariMapper/actions/workflows/test_ubuntu.yml)
-[![MacOS](https://github.com/TheMariday/MariMapper/actions/workflows/test_mac.yml/badge.svg)](https://github.com/TheMariday/MariMapper/actions/workflows/test_mac.yml)
-[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+This guide covers **single-camera 2D mapping**: turn each DMX channel on in turn, detect the LED in the camera, and save a CSV of pixel positions plus companion images.
 
-> [!WARNING]  
-> Marimapper is currently undergoing major breaking changes
-> 
-> v4.0.0 is targetted for release in November 2026
->
-> See more info [here](https://github.com/TheMariday/marimapper/discussions/86)
+This uses the **DMX GUI** (`marimapper_dmx_gui`), not the multi-view 3D `marimapper` scanner.
 
-### Marimapper can use your webcam to map addressable LEDs to 3D space!
+## What you need
 
-![](docs/images/reconstruct_with_normals_and_strips.png)
+- A **DMX output** device supported by the GUI:
+  - **Art-Net** (Ethernet to a node or software)
+  - **Enttec USB Pro** (serial DMX)
+  - **Generic USB (FTDI)** (raw 250k DMX)
+- A **webcam** or capture device (USB camera, built-in, etc.)
+- Your fixtures wired so **one DMX channel = one identifiable LED** for the scan range you configure
+- Dim ambient light — stray bright pixels cause missed or false detections
 
-Above example data folder can be found under [docs/highbeam_example/](docs/highbeam_example)
+Backend-specific network/USB notes: [ArtNet.md](docs/backends/ArtNet.md), [Enttec.md](docs/backends/Enttec.md), [GenericUsb.md](docs/backends/GenericUsb.md).
 
-> [!CAUTION]
-> Exposure control is [not supported on mac](https://github.com/TheMariday/marimapper/issues/51)
-> 
-> You can however adjust the exposure manually in third party tools or use the software that comes with your webcam
+## Install and launch
 
+From this repo (recommended for development):
 
-## Step 0: Install
+```bash
+cd /Users/stephanschulz/Documents/cursor_ai/pixel-mapper
+python -m venv .venv
+source .venv/bin/activate
+pip install -e .
+marimapper_dmx_gui
+```
 
-If you're on Windows, first install UV with
+Or install globally with [uv](https://github.com/astral-sh/uv) / pip as described in [README.md](README.md), then run:
 
-`powershell -c "irm https://astral.sh/uv/install.ps1 | iex"` 
+```bash
+marimapper_dmx_gui
+```
 
-Or if you're using Linux or Mac
+On startup you get **two windows**:
 
-`curl -LsSf https://astral.sh/uv/install.sh | sh`
+1. **MariMapper DMX + Detection** — DMX output, channel mapping, test patterns
+2. **Camera — LED detection** — live preview, ROI, single-LED test, 2D scan
 
-Once UV is installed, install marimapper with
+Settings are saved to `marimapper/dmx/dmx_gui_settings.json` (camera, exposure, ROI, UVC on macOS, etc.).
 
-`uv tool install git+https://github.com/TheMariday/marimapper`
+Optional: verify the camera alone before calibrating:
 
-You can run the scripts anywhere by just typing them into a console.
+```bash
+marimapper_check_camera
+```
 
+Use `--device N` if the wrong camera is selected (same index as in the GUI dropdown).
 
-If you don't want to use UV, then Marimapper also supports PipX and pip
+## Step 1 — Configure DMX output
 
-## Step 1: Test your camera
+In the **DMX** window:
 
-> [!TIP]
-> use `--help` for any MariMapper command to show a full list of additional arguments! 
-> 
-> Some not even in this doc...
+### Output device
 
-Run `marimapper_check_camera` to ensure your camera is compatible with MariMapper, or check the list below:
+| Mode | What to set |
+|------|-------------|
+| **Art-Net** | Target IP, universe start/end, optional **ArtSync** |
+| **Enttec USB Pro** | Serial port (**Refresh ports** if empty) |
+| **Generic USB** | FTDI device URL |
 
-- HP 4310 (settings may not revert)
-- Logitech C920
-- Dell Latitude 5521 built-in
-- HP Envy x360 built-in 
+Use **All ON** / **Chase** to confirm fixtures respond before scanning.
 
-If your camera works, please drop me a line, so I can add it to the list!
+### LED detection (DMX mapping)
 
+Under **LED detection (DMX mapping)**:
 
-Test LED identification by turning down the lights and holding a torch or led up to the camera.
+| Setting | Meaning |
+|---------|---------|
+| **DMX channels** (min → max) | Channel range used for the scan, e.g. `1` to `50` |
+| **Universe (Art-Net)** | Art-Net universe for detection output |
+| **Channels / bulb** | DMX channels per fixture (usually `1` for one channel per pixel) |
+| **DMX on level** | Brightness while a LED is on during test/scan (default `255`) |
 
-This should start with few warnings, no errors and produce a **very** dark image
-with a single crosshair on centered on your LED.
+**LED index → DMX channel:**
 
-Wrong webcam? MariMapper tools use `--device 0` by default, use `--device 1` to switch to your second webcam.
+```
+DMX channel = min_channel + (LED index × channels_per_fixture)
+```
 
-![alt text](docs/images/camera_check.png "Camera Check window")
+Example: min channel `1`, 1 channel per bulb → LED index `0` → DMX `1`, index `4` → DMX `5`.
 
+The number of LEDs scanned = `(max_channel - min_channel + 1) / channels_per_fixture`.
 
-> [!TIP]
-> If the image is still too bright or you can't see a crosshair on your LED, try dimming the lights and playing around with:
-> 
-> - `--exposure` - The lower the darker, defaults to `-10`, my webcam only goes down to `-11`
-> - `--threshold` - The lower the more detections, ranges between `0-255`,  defaults to `128`
-## Step 2: Choose your backend
+Changing these values updates the **LED index** spinner range in the camera window.
 
-For the Marimapper to communicate with your leds, it requires a backend.
+## Step 2 — Set up the camera
 
-Please see below for documentation on how to run the following backends:
+In the **Camera** window:
 
-- 🟢 [FadeCandy](https://github.com/TheMariday/marimapper/tree/main/docs/backends/FadeCandy.md) - Tested
-- 🟢 [FCMega](https://github.com/TheMariday/marimapper/tree/main/docs/backends/FCMEGA.md) - Tested
-- 🟠 [WLED](https://github.com/TheMariday/marimapper/tree/main/docs/backends/WLED.md) - Community tested
-- 🟠 [PixelBlaze](https://github.com/TheMariday/marimapper/tree/main/docs/backends/PixelBlaze.md) - Community tested
-- 🟠 [ArtNet](https://github.com/TheMariday/marimapper/tree/main/docs/backends/ArtNet.md) - Community tested (DMX GUI + scan backend)
-- 🟠 [Enttec USB Pro](https://github.com/TheMariday/marimapper/tree/main/docs/backends/Enttec.md) - Community tested (DMX GUI + scan backend)
-- 🟠 [Generic USB (FTDI)](https://github.com/TheMariday/marimapper/tree/main/docs/backends/GenericUsb.md) - Community tested (DMX GUI + scan backend)
+1. **Camera** — pick the correct device; **Refresh** if needed.
+2. **Exposure** — lower (more negative) for a darker image if the scene is too bright. On macOS, exposure control is limited; use the **UVC controls** panel (focus, gain, brightness, etc.) when available.
+3. **Threshold** — brightness cutoff for detection (`0–255`). The **Threshold view** panel shows what the detector sees.
+4. **Frame difference** — leave enabled for best results on a dark scene (learns background, detects flashes).
 
-If your LED backend isn't supported, you need to write your own, 
-[it's super simple](https://github.com/TheMariday/marimapper/tree/main/docs/backends/custom.md)!
+### Region of interest (optional)
 
+If only part of the frame contains LEDs:
 
-> [!TIP]
-> Run `marimapper_dmx_gui` for Art-Net / Enttec / Generic USB DMX control **and camera LED detection** (channel range + universe).
+1. Click **Draw ROI**
+2. Click polygon corners on the live preview
+3. **Double-click** to close the polygon (minimum 3 points)
+4. **Clear ROI** to use the full frame again
 
-> [!TIP]
-> use `marimapper wled --help` for any backend to show a full list of additional arguments 
-> such as server, channel, etc! 
-> 
-> Some not even in this doc...
+Detection runs only inside the ROI.
 
-## Step 3: Setup your scene
+## Step 3 — Test one LED
 
-- 🪨 Make sure that your camera is stable and won't move, try mounting it on a tripod if you can
-- 💡 Make sure there are no light sources in your cameras view, tape up power leds and notification lights
-- ✋ Make sure you can move your camera around without changing the layout of your leds, 
-even a small nudge can throw off the reconstructor!
+Before a full scan:
 
-## Step 4: [It's time to thunderize!](https://youtu.be/-5KJiHc3Nuc?t=121)
+1. Set **LED index** to a fixture you can see in the camera
+2. The DMX window lights that channel (others at 0)
+3. Click **Test this ID**
 
-In a new folder, run `marimapper fadecandy`
+A green crosshair should appear on the LED in the preview when detection succeeds. Adjust exposure, threshold, or ROI if it fails.
 
-and change `fadecandy` to whatever backend you're using and use `--help` to show more options
+While stepping indices, the status line shows the active **DMX channel** and **LED index**.
 
-Set up your LEDs so most of them are in view and when you're ready, type `y` when prompted with `Start scan? [y/n]`
+## Step 4 — Run the 2D scan
 
-This will turn each LED on and off in turn, **do not move the camera or leds during capture!**
+1. Mount the camera so it **does not move** during the scan
+2. Turn off or cover unrelated light sources in view
+3. Click **Run 2D detection scan**
 
-If you just want a 2D map, this is where you can stop!
+The app steps through every LED index in range, flashes each channel, and detects its position. Progress appears in the status line (`Scan 12/50: LED 11 OK …`).
 
-Rotate your leds or move your webcam to a new position
+**Do not move the camera or fixtures during the scan.**
 
-> [!TIP]
-> As long as some of your leds are mostly in view, you can move your webcam to wherever you like!
-> Try and get at least 3 views between 6° - 20° apart
+Click **Run 2D detection scan** again while a scan is running to stop it.
 
-Once you have a few views and the reconstructor succeeds, a new window will appear showing the reconstructed 3D positions of your LEDs.
+When finished, the **2D LED map** window opens automatically with the new capture selected.
 
-If the window doesn't appear after 4 scans, then something has gone horribly wrong. Delete the scan .csv files in the current working directory and try again.
+## Step 5 — Review and export
 
-If it doesn't look quite right, add some more scans!
+### 2D LED map window
 
-Here is an example reconstruction of a test tube of LEDs I have
+- **Map CSV** dropdown — browse past scans (newest first)
+- **Mapped LEDs** — zoom with mouse wheel (cursor-centered), double-click to reset zoom
+- Table columns: **Index**, **DMX**, **u**, **v** (normalized image coordinates, `0–1`)
+- **Save CSV as…** — copy the map to another path (includes images and metadata)
 
-![](docs/images/live_example.png)
+### Output files
 
+Scans are saved under the project **`scans/`** folder:
 
-### How to move the model around
+```
+scans/
+  led_map_2d_YYYYMMDD-HHMMSS.csv      # LED positions
+  led_map_2d_YYYYMMDD-HHMMSS.png      # raw camera frame from the scan
+  led_map_2d_YYYYMMDD-HHMMSS_map.png  # same frame + crosshairs + DMX labels
+  led_map_2d_YYYYMMDD-HHMMSS.meta.json
+```
 
-- Click and drag to rotate the model around. 
-- Hold shift to roll the camera
-- Use the scroll wheel to zoom in / out
-- Use the `n` key to hide / show normals
-- Use the `+` / `-` keys to increase / decrease point sizes
-- Use `1`, `2`, `3` & `4` keys to change colour scheme
+**CSV format** (`index,dmx,u,v`):
 
-### LED Colors:
-By default (`1`), the colors of the leds in the visualiser are as follows:
+```csv
+index,dmx,u,v
+0,1,0.986425,0.400617
+1,2,0.802659,0.555862
+```
 
-- Green: Reconstructed
-- Blue: Interpolated
+- **index** — scan LED index (0-based)
+- **dmx** — 1-based DMX channel used for that LED
+- **u**, **v** — normalized coordinates in the camera image
 
-# Not working?
+**Meta JSON** stores `scan_total`, `min_channel`, and `channels_per_fixture` used when the scan was captured.
 
-Make sure you've read this readme all the way through and do give those error messages a good read too.
+Older maps saved to `~/marimapper_maps/` are moved into `scans/` automatically on first open of the map window.
 
-They should be able to tell you at least roughly what area is going wrong.
+## Tips and troubleshooting
 
-If you want a lot more reading material, run `marimapper` with `-v` to put it into verbose mode.
-This will tell you pretty much everything marimapper is doing under the hood.
-Also good if you're just curious as to why *x* is taking so long!
+| Problem | Things to try |
+|---------|----------------|
+| No fixture response | Check DMX wiring, universe/IP/port, **All ON**, on level |
+| LED not detected | Darken room, lower exposure, tune threshold, enable frame diff, draw ROI |
+| Wrong LED lights | Fix min/max channel and channels-per-bulb; confirm fixture addressing |
+| Too many false hits | Raise threshold, tighten ROI, remove reflections |
+| Wrong camera | Change **Camera** dropdown or run `marimapper_check_camera --device N` |
+| Scan finishes with 0 detections | Test individual IDs first; verify DMX and camera alignment |
+| macOS exposure | Use UVC panel; manual camera app settings if needed ([README](README.md#step-0-install)) |
 
-# Feedback
+## DMX channel mapping reference
 
-I would really love to hear what you think and if you have any bugs or improvements, please raise them here or drop me a
-line on [Telegram](https://t.me/themariday).
+For a contiguous run of single-channel fixtures:
 
-You can also raise issues [on this repo's issues page](https://github.com/TheMariday/marimapper/issues)
+| LED index | DMX channel (1-based) |
+|-----------|------------------------|
+| 0 | `min_channel` |
+| 1 | `min_channel + channels_per_fixture` |
+| n | `min_channel + n × channels_per_fixture` |
 
-If you implement a backend that you think others might use, 
-please raise a [pull request](https://github.com/TheMariday/marimapper/pulls) 
-or just drop me a message on [Telegram](https://t.me/themariday)!
+Multi-channel fixtures: set **Channels / bulb** to match your patch so each logical LED still maps to the first channel of its fixture block.
 
-You can find a guide on how to write backends [here](marimapper\backends\backend_writing_guide.md)
+## Related commands
 
-# Licensing
+CLI backends (multi-view 3D pipeline, not the GUI scan) use the same channel settings:
 
-The licensing on this is [GPLv3](LICENSE).
+```bash
+marimapper artnet --help
+marimapper enttec --help
+```
 
-The TLDR is you can do anything you like with this as long as it's open source
+For this project's **2D DMX calibration workflow**, use **`marimapper_dmx_gui`** and the camera window scan.
